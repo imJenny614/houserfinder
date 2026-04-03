@@ -98,6 +98,57 @@ async def debug_scrape():
     return results
 
 
+@router.get("/debug/page")
+async def debug_page(url: str = Query(...)):
+    """Load a URL in Playwright and return title, final URL, selector counts, and HTML snippet."""
+    from ..scrapers.browser import get_browser, new_context
+    import base64
+
+    browser = await get_browser()
+    ctx = await new_context(browser)
+    try:
+        pg = await ctx.new_page()
+        await pg.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await pg.wait_for_timeout(3000)
+
+        title = await pg.title()
+        final_url = pg.url
+        html_snippet = (await pg.content())[:3000]
+
+        # Count how many elements match various selectors
+        selector_counts = await pg.evaluate("""() => {
+            const selectors = [
+                '[data-listing-id]',
+                '.listing-card',
+                '.property-card',
+                'a[href*="/rent/"]',
+                'a[href*="for-rent"]',
+                '[class*="listing"]',
+                '[class*="property"]',
+                '[class*="price"]',
+            ];
+            const result = {};
+            for (const sel of selectors) {
+                result[sel] = document.querySelectorAll(sel).length;
+            }
+            return result;
+        }""")
+
+        # Take a screenshot and return as base64
+        screenshot = await pg.screenshot(type="jpeg", quality=60)
+        screenshot_b64 = base64.b64encode(screenshot).decode()
+
+        return {
+            "title": title,
+            "final_url": final_url,
+            "selector_counts": selector_counts,
+            "html_snippet": html_snippet,
+            "screenshot_base64": screenshot_b64,
+        }
+    finally:
+        await ctx.close()
+
+
 @router.post("/search", response_model=SearchResponse)
 async def ai_search(request: SearchRequest):
     client = _get_ai_client()
