@@ -3,10 +3,11 @@ Shared Playwright browser instance for all scrapers.
 Call `get_browser()` to get a reusable browser, `close_browser()` on app shutdown.
 """
 import asyncio
+from typing import Optional
 from playwright.async_api import async_playwright, Browser, BrowserContext
 
 _playwright = None
-_browser: Browser | None = None
+_browser: Optional[Browser] = None
 _lock = asyncio.Lock()
 
 
