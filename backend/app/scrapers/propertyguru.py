@@ -41,8 +41,8 @@ class PropertyGuruScraper(BaseScraper):
             await pg.goto(url, wait_until="domcontentloaded", timeout=30000)
             # Wait for listing cards to appear
             await pg.wait_for_selector(
-                "[data-listing-id], .listing-card, .property-card",
-                timeout=10000,
+                "[da-listing-id]",
+                timeout=15000,
             )
             # Small human-like pause
             await asyncio.sleep(1.5)
@@ -55,31 +55,35 @@ class PropertyGuruScraper(BaseScraper):
             await ctx.close()
 
     def _extract_js(self) -> str:
-        """JavaScript run in the page to extract listing data."""
+        """JavaScript run in the page to extract listing data using da-id attributes."""
         return """
         () => {
-            const cards = document.querySelectorAll('[data-listing-id]');
+            const cards = document.querySelectorAll('[da-listing-id]');
             return Array.from(cards).map(card => {
-                const titleEl = card.querySelector('h3 a, .nav-head a, [class*="title"] a');
-                const priceEl = card.querySelector('[class*="price"]');
-                const addrEl  = card.querySelector('[class*="address"], [class*="location"]');
-                const bedEl   = card.querySelector('[data-beds], [class*="bed"]');
-                const bathEl  = card.querySelector('[data-baths], [class*="bath"]');
-                const areaEl  = card.querySelector('[class*="area"], [class*="size"]');
-                const imgEl   = card.querySelector('img[src]');
+                const listingId = card.getAttribute('da-listing-id') || '';
+                const priceEl = card.querySelector('[da-id="listing-card-v2-price"]');
+                const titleEl = card.querySelector('[da-id="listing-card-v2-title"]');
+                const addrEl  = card.querySelector('.listing-address');
+                const bedEl   = card.querySelector('[da-id="listing-card-v2-bedrooms"]');
+                const bathEl  = card.querySelector('[da-id="listing-card-v2-bathrooms"]');
+                const areaEl  = card.querySelector('[da-id="listing-card-v2-floorarea"]');
+                const linkEl  = card.querySelector('a[href*="/listing/"]');
+                const imgEl   = card.querySelector('img[src*="pgimgs"]');
 
                 const priceText = priceEl ? priceEl.innerText.replace(/[^0-9]/g, '') : '0';
+                const url = linkEl ? linkEl.href
+                    : (listingId ? 'https://www.propertyguru.com.sg/listing/' + listingId : '');
 
                 return {
-                    listing_id: card.dataset.listingId || '',
-                    title:  titleEl ? titleEl.innerText.trim() : '',
-                    url:    titleEl ? (titleEl.href || '') : '',
-                    price:  parseInt(priceText) || 0,
-                    address: addrEl ? addrEl.innerText.trim() : '',
-                    bedrooms: bedEl ? parseInt(bedEl.innerText) || null : null,
-                    bathrooms: bathEl ? parseInt(bathEl.innerText) || null : null,
-                    area: areaEl ? parseInt(areaEl.innerText.replace(/[^0-9]/g, '')) || null : null,
-                    image: imgEl ? imgEl.src : '',
+                    listing_id: listingId,
+                    title:    titleEl ? titleEl.innerText.trim() : '',
+                    url,
+                    price:    parseInt(priceText) || 0,
+                    address:  addrEl  ? addrEl.innerText.trim()  : '',
+                    bedrooms: bedEl   ? parseInt(bedEl.innerText)  || null : null,
+                    bathrooms:bathEl  ? parseInt(bathEl.innerText) || null : null,
+                    area:     areaEl  ? parseInt(areaEl.innerText.replace(/[^0-9]/g, '')) || null : null,
+                    image:    imgEl   ? imgEl.src : '',
                 };
             });
         }
