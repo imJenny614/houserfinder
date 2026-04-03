@@ -1,5 +1,6 @@
 import asyncio
-from fastapi import APIRouter, Query, HTTPException
+from typing import Optional
+from fastapi import APIRouter, Query
 from ..models.listing import Listing, SearchRequest, SearchResponse
 from ..scrapers import PropertyGuruScraper, NinetyNineScraper
 from ..config import settings
@@ -17,11 +18,11 @@ def _get_ai_client():
 
 @router.get("/listings", response_model=list[Listing])
 async def get_listings(
-    min_price: int | None = Query(None),
-    max_price: int | None = Query(None),
-    bedrooms: int | None = Query(None),
-    district: str | None = Query(None),
-    property_type: str | None = Query(None),
+    min_price: Optional[int] = Query(None),
+    max_price: Optional[int] = Query(None),
+    bedrooms: Optional[int] = Query(None),
+    district: Optional[str] = Query(None),
+    property_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
 ):
     """Fetch raw listings from all sources with optional filters."""
