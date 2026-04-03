@@ -1,9 +1,12 @@
 import hashlib
 import asyncio
+import logging
 from typing import Optional
 from .base import BaseScraper
 from .browser import get_browser, new_context
 from ..models.listing import Listing
+
+logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.propertyguru.com.sg/property-for-rent"
 
@@ -45,7 +48,8 @@ class PropertyGuruScraper(BaseScraper):
             await asyncio.sleep(1.5)
             listings = await pg.evaluate(self._extract_js())
             return [self._to_listing(d) for d in listings if d.get("price")]
-        except Exception:
+        except Exception as e:
+            logger.error(f"[PropertyGuru] scrape failed: {e}", exc_info=True)
             return []
         finally:
             await ctx.close()

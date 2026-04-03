@@ -1,7 +1,10 @@
 import asyncio
 import json
+import logging
 from typing import Optional
 from fastapi import APIRouter, Query
+
+logger = logging.getLogger(__name__)
 from ..models.listing import Listing, SearchRequest, SearchResponse
 from ..scrapers import PropertyGuruScraper, NinetyNineScraper
 from ..mock_data import MOCK_LISTINGS, filter_mock
@@ -51,7 +54,7 @@ async def _fetch_listings(
             listings.extend(result)
 
     if not listings:
-        # Fall back to filtered mock data so the UI always shows something
+        logger.warning("All scrapers returned empty — falling back to mock data")
         listings = filter_mock(
             MOCK_LISTINGS,
             min_price=min_price, max_price=max_price,
@@ -76,6 +79,23 @@ async def get_listings(
         min_price=min_price, max_price=max_price, bedrooms=bedrooms,
         district=district, property_type=property_type, page=page,
     )
+
+
+@router.get("/debug/scrape")
+async def debug_scrape():
+    """Test each scraper independently and return raw results + errors."""
+    results = {}
+    for scraper in _scrapers:
+        try:
+            items = await scraper.search()
+            results[scraper.source_name] = {
+                "count": len(items),
+                "sample": [i.model_dump() for i in items[:2]],
+                "error": None,
+            }
+        except Exception as e:
+            results[scraper.source_name] = {"count": 0, "sample": [], "error": str(e)}
+    return results
 
 
 @router.post("/search", response_model=SearchResponse)
