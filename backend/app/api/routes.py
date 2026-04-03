@@ -13,7 +13,7 @@ from ..config import settings
 
 router = APIRouter()
 
-_scrapers = [PropertyGuruScraper(), NinetyNineScraper()]
+_scrapers = [PropertyGuruScraper()]
 
 
 def _get_ai_client():
