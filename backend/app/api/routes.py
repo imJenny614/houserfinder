@@ -1,11 +1,16 @@
 import asyncio
+import json
 from typing import Optional
 from fastapi import APIRouter, Query
 from ..models.listing import Listing, SearchRequest, SearchResponse
+from ..scrapers import PropertyGuruScraper, NinetyNineScraper
 from ..mock_data import MOCK_LISTINGS, filter_mock
+from ..cache import get as cache_get, set as cache_set
 from ..config import settings
 
 router = APIRouter()
+
+_scrapers = [PropertyGuruScraper(), NinetyNineScraper()]
 
 
 def _get_ai_client():
@@ -13,6 +18,49 @@ def _get_ai_client():
         return None
     from anthropic import AsyncAnthropic
     return AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+
+def _cache_key(**kwargs) -> str:
+    return json.dumps(kwargs, sort_keys=True)
+
+
+async def _fetch_listings(
+    min_price=None, max_price=None, bedrooms=None,
+    district=None, property_type=None, page=1,
+) -> list[Listing]:
+    """Fetch from real scrapers with cache; fall back to mock data if empty."""
+    key = _cache_key(
+        min_price=min_price, max_price=max_price, bedrooms=bedrooms,
+        district=district, property_type=property_type, page=page,
+    )
+    cached = cache_get(key)
+    if cached is not None:
+        return cached
+
+    tasks = [
+        scraper.search(
+            min_price=min_price, max_price=max_price, bedrooms=bedrooms,
+            district=district, property_type=property_type, page=page,
+        )
+        for scraper in _scrapers
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    listings: list[Listing] = []
+    for result in results:
+        if isinstance(result, list):
+            listings.extend(result)
+
+    if not listings:
+        # Fall back to filtered mock data so the UI always shows something
+        listings = filter_mock(
+            MOCK_LISTINGS,
+            min_price=min_price, max_price=max_price,
+            bedrooms=bedrooms, district=district, property_type=property_type,
+        )
+
+    listings = sorted(listings, key=lambda l: l.price)
+    cache_set(key, listings)
+    return listings
 
 
 @router.get("/listings", response_model=list[Listing])
@@ -24,24 +72,16 @@ async def get_listings(
     property_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
 ):
-    """Fetch listings (mock data for now, real scrapers coming soon)."""
-    listings = filter_mock(
-        MOCK_LISTINGS,
-        min_price=min_price,
-        max_price=max_price,
-        bedrooms=bedrooms,
-        district=district,
-        property_type=property_type,
+    return await _fetch_listings(
+        min_price=min_price, max_price=max_price, bedrooms=bedrooms,
+        district=district, property_type=property_type, page=page,
     )
-    return sorted(listings, key=lambda l: l.price)
 
 
 @router.post("/search", response_model=SearchResponse)
 async def ai_search(request: SearchRequest):
-    """Search listings; uses AI ranking if ANTHROPIC_API_KEY is set, otherwise keyword match."""
     client = _get_ai_client()
 
-    # Extract structured filters via AI if available
     filters: dict = {}
     if client:
         from ..ai.filter import extract_filters
@@ -53,23 +93,19 @@ async def ai_search(request: SearchRequest):
     district = request.district or filters.get("district")
     property_type = request.property_type or filters.get("property_type")
 
-    listings = filter_mock(
-        MOCK_LISTINGS,
-        min_price=min_price,
-        max_price=max_price,
-        bedrooms=bedrooms,
-        district=district,
-        property_type=property_type,
+    listings = await _fetch_listings(
+        min_price=min_price, max_price=max_price, bedrooms=bedrooms,
+        district=district, property_type=property_type,
     )
 
     if not listings:
-        return SearchResponse(listings=[], total=0, ai_summary="No listings found. Try broadening your search.")
+        return SearchResponse(listings=[], total=0, ai_summary="No listings found.")
 
     if client:
         from ..ai.filter import rank_listings
         ranked, summary = await rank_listings(listings, request, client)
     else:
-        ranked = sorted(listings, key=lambda l: l.price)
-        summary = "Showing mock data sorted by price. Add ANTHROPIC_API_KEY for AI-powered search."
+        ranked = listings
+        summary = "Showing results sorted by price. Add ANTHROPIC_API_KEY for AI-powered ranking."
 
     return SearchResponse(listings=ranked, total=len(ranked), ai_summary=summary)

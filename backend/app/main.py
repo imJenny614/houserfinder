@@ -1,8 +1,18 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .api.routes import router
+from .scrapers.browser import close_browser
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await close_browser()
+
 
 app = FastAPI(
+    lifespan=lifespan,
     title="HouserFinder API",
     description="Singapore rental listing aggregator with AI-powered search",
     version="0.1.0",
