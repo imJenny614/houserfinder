@@ -115,7 +115,7 @@ async def debug_page(url: str = Query(...)):
         final_url = pg.url
         html_snippet = (await pg.content())[:3000]
 
-        # Count how many elements match various selectors
+        # Count how many elements match various selectors + sample HTML
         selector_counts = await pg.evaluate("""() => {
             const selectors = [
                 '[data-listing-id]',
@@ -129,7 +129,11 @@ async def debug_page(url: str = Query(...)):
             ];
             const result = {};
             for (const sel of selectors) {
-                result[sel] = document.querySelectorAll(sel).length;
+                const els = document.querySelectorAll(sel);
+                result[sel] = {
+                    count: els.length,
+                    sample_html: els[0] ? els[0].outerHTML.slice(0, 800) : null,
+                };
             }
             return result;
         }""")
