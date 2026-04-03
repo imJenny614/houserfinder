@@ -2,12 +2,11 @@ import asyncio
 from typing import Optional
 from fastapi import APIRouter, Query
 from ..models.listing import Listing, SearchRequest, SearchResponse
-from ..scrapers import PropertyGuruScraper, NinetyNineScraper
+from ..mock_data import MOCK_LISTINGS, filter_mock
 from ..config import settings
 
 router = APIRouter()
 
-_scrapers = [PropertyGuruScraper(), NinetyNineScraper()]
 
 def _get_ai_client():
     if not settings.anthropic_api_key:
@@ -25,32 +24,24 @@ async def get_listings(
     property_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
 ):
-    """Fetch raw listings from all sources with optional filters."""
-    tasks = [
-        scraper.search(
-            min_price=min_price,
-            max_price=max_price,
-            bedrooms=bedrooms,
-            district=district,
-            property_type=property_type,
-            page=page,
-        )
-        for scraper in _scrapers
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    listings: list[Listing] = []
-    for result in results:
-        if isinstance(result, list):
-            listings.extend(result)
+    """Fetch listings (mock data for now, real scrapers coming soon)."""
+    listings = filter_mock(
+        MOCK_LISTINGS,
+        min_price=min_price,
+        max_price=max_price,
+        bedrooms=bedrooms,
+        district=district,
+        property_type=property_type,
+    )
     return sorted(listings, key=lambda l: l.price)
 
 
 @router.post("/search", response_model=SearchResponse)
 async def ai_search(request: SearchRequest):
-    """Search listings; uses AI ranking if ANTHROPIC_API_KEY is set, otherwise returns raw results."""
+    """Search listings; uses AI ranking if ANTHROPIC_API_KEY is set, otherwise keyword match."""
     client = _get_ai_client()
 
-    # If AI is available, extract structured filters from the query
+    # Extract structured filters via AI if available
     filters: dict = {}
     if client:
         from ..ai.filter import extract_filters
@@ -62,32 +53,23 @@ async def ai_search(request: SearchRequest):
     district = request.district or filters.get("district")
     property_type = request.property_type or filters.get("property_type")
 
-    # Fetch from all scrapers in parallel
-    tasks = [
-        scraper.search(
-            min_price=min_price,
-            max_price=max_price,
-            bedrooms=bedrooms,
-            district=district,
-            property_type=property_type,
-        )
-        for scraper in _scrapers
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    listings: list[Listing] = []
-    for result in results:
-        if isinstance(result, list):
-            listings.extend(result)
+    listings = filter_mock(
+        MOCK_LISTINGS,
+        min_price=min_price,
+        max_price=max_price,
+        bedrooms=bedrooms,
+        district=district,
+        property_type=property_type,
+    )
 
     if not listings:
         return SearchResponse(listings=[], total=0, ai_summary="No listings found. Try broadening your search.")
 
-    # AI ranking (only if key is configured)
     if client:
         from ..ai.filter import rank_listings
         ranked, summary = await rank_listings(listings, request, client)
     else:
         ranked = sorted(listings, key=lambda l: l.price)
-        summary = "AI ranking unavailable (no API key). Showing results sorted by price."
+        summary = "Showing mock data sorted by price. Add ANTHROPIC_API_KEY for AI-powered search."
 
     return SearchResponse(listings=ranked, total=len(ranked), ai_summary=summary)
