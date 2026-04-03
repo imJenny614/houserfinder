@@ -1,15 +1,18 @@
 import asyncio
 from fastapi import APIRouter, Query, HTTPException
-from anthropic import AsyncAnthropic
 from ..models.listing import Listing, SearchRequest, SearchResponse
 from ..scrapers import PropertyGuruScraper, NinetyNineScraper
-from ..ai.filter import extract_filters, rank_listings
 from ..config import settings
 
 router = APIRouter()
 
-_anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 _scrapers = [PropertyGuruScraper(), NinetyNineScraper()]
+
+def _get_ai_client():
+    if not settings.anthropic_api_key:
+        return None
+    from anthropic import AsyncAnthropic
+    return AsyncAnthropic(api_key=settings.anthropic_api_key)
 
 
 @router.get("/listings", response_model=list[Listing])
@@ -43,11 +46,15 @@ async def get_listings(
 
 @router.post("/search", response_model=SearchResponse)
 async def ai_search(request: SearchRequest):
-    """AI-powered natural language search across all sources."""
-    # Extract structured filters from query
-    filters = await extract_filters(request.query, _anthropic_client)
+    """Search listings; uses AI ranking if ANTHROPIC_API_KEY is set, otherwise returns raw results."""
+    client = _get_ai_client()
 
-    # Merge explicit params from request body over AI-extracted ones
+    # If AI is available, extract structured filters from the query
+    filters: dict = {}
+    if client:
+        from ..ai.filter import extract_filters
+        filters = await extract_filters(request.query, client)
+
     min_price = request.min_price or filters.get("min_price")
     max_price = request.max_price or filters.get("max_price")
     bedrooms = request.bedrooms or filters.get("bedrooms")
@@ -74,7 +81,12 @@ async def ai_search(request: SearchRequest):
     if not listings:
         return SearchResponse(listings=[], total=0, ai_summary="No listings found. Try broadening your search.")
 
-    # AI ranking
-    ranked, summary = await rank_listings(listings, request, _anthropic_client)
+    # AI ranking (only if key is configured)
+    if client:
+        from ..ai.filter import rank_listings
+        ranked, summary = await rank_listings(listings, request, client)
+    else:
+        ranked = sorted(listings, key=lambda l: l.price)
+        summary = "AI ranking unavailable (no API key). Showing results sorted by price."
 
     return SearchResponse(listings=ranked, total=len(ranked), ai_summary=summary)
